@@ -37,8 +37,7 @@ include(GNUInstallDirs)
 #######################
 
 option(BUILD_GSTREAMER_PLUGIN "enable gstreamer plugin" ON)
-option(BUILD_ROS_PLUGINS "Enable building ROS dependent plugins" OFF)
-option(GENERATE_ROS_MODELS "Generate model sdf for ROS environment" OFF)
+option(BUILD_ROS_INTERFACE "Enable building ROS dependent plugins" ON)
 
 option(SEND_VISION_ESTIMATION_DATA "Send Mavlink VISION_POSITION_ESTIMATE msgs" OFF)
 option(SEND_ODOMETRY_DATA "Send Mavlink ODOMETRY msgs" OFF)
@@ -47,6 +46,7 @@ option(SEND_ODOMETRY_DATA "Send Mavlink ODOMETRY msgs" OFF)
 find_package(Boost 1.58 REQUIRED COMPONENTS system thread filesystem)
 find_package(gazebo REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(caktin)
 pkg_search_module(GLIB REQUIRED glib-2.0)
 # Note: If using catkin, Python 2 is found since it points
 # to the Python libs installed with the ROS distro
@@ -104,11 +104,18 @@ add_subdirectory( external/OpticalFlow OpticalFlow )
 set( OpticalFlow_LIBS "OpticalFlow" )
 
 # for ROS subscribers and publishers
-if (BUILD_ROS_PLUGINS)
+if (BUILD_ROS_INTERFACE)
   find_package(geometry_msgs REQUIRED)
   find_package(roscpp REQUIRED)
   find_package(sensor_msgs REQUIRED)
+  find_package(std_msgs REQUIRED)
 endif()
+
+find_package(roscpp REQUIRED)
+find_package(std_msgs REQUIRED)
+include_directories(${roscpp_INCLUDE_DIRS})
+include_directories(${std_msgs_INCLUDE_DIRS})
+
 
 # find MAVLink
 find_package(MAVLink)
@@ -271,21 +278,12 @@ function(glob_generate target file_glob)
 		set(out_file ${CMAKE_CURRENT_SOURCE_DIR}/${file_name})
 		string(REGEX REPLACE ".sdf" ".sdf" out_file ${out_file})
 		if (${file_ext} STREQUAL "jinja")
-			if(GENERATE_ROS_MODELS)
-				add_custom_command(OUTPUT ${out_file}
-        	                	COMMAND
-                	                        ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file} ${CMAKE_CURRENT_SOURCE_DIR} --generate_ros_models true
-                        	        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file}
-                                	VERBATIM
-	                                )
-			else()
-				add_custom_command(OUTPUT ${out_file}
-	                                COMMAND
-        	                                ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file} ${CMAKE_CURRENT_SOURCE_DIR}
-                	                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file}
-                        	        VERBATIM
-                                	)
-			endif()
+			add_custom_command(OUTPUT ${out_file}
+				COMMAND
+					${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file} ${CMAKE_CURRENT_SOURCE_DIR}
+				DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/jinja_gen.py ${in_file}
+				VERBATIM
+				)
 			list(APPEND gen_files_${target} ${out_file})
 			string(REGEX REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" gitignore_str ${in_file})
 			string(REGEX REPLACE ".jinja" "" gitignore_str ${gitignore_str})
@@ -310,7 +308,7 @@ set(mav_msgs
   )
 set(nav_msgs msgs/Odometry.proto)
 set(physics_msgs msgs/Wind.proto)
-set(std_msgs msgs/Int32.proto)
+set(std_msgs msgs/Int32.proto) # msgs/Float.proto)
 set(sensor_msgs
   msgs/Airspeed.proto
   msgs/Imu.proto
@@ -344,7 +342,7 @@ link_libraries(mav_msgs nav_msgs std_msgs sensor_msgs)
 link_libraries(physics_msgs)
 
 add_library(gazebo_airspeed_plugin SHARED src/gazebo_airspeed_plugin.cpp)
-add_library(gazebo_camera_manager_plugin SHARED src/gazebo_camera_manager_plugin.cpp)
+add_library(gazebo_geotagged_images_plugin SHARED src/gazebo_geotagged_images_plugin.cpp)
 add_library(gazebo_gps_plugin SHARED src/gazebo_gps_plugin.cpp)
 add_library(gazebo_groundtruth_plugin SHARED src/gazebo_groundtruth_plugin.cpp)
 add_library(gazebo_irlock_plugin SHARED src/gazebo_irlock_plugin.cpp)
@@ -367,11 +365,11 @@ add_library(gazebo_catapult_plugin SHARED src/gazebo_catapult_plugin.cpp)
 add_library(gazebo_usv_dynamics_plugin SHARED src/gazebo_usv_dynamics_plugin.cpp)
 add_library(gazebo_parachute_plugin SHARED src/gazebo_parachute_plugin.cpp)
 add_library(gazebo_airship_dynamics_plugin SHARED src/gazebo_airship_dynamics_plugin.cpp)
-add_library(gazebo_drop_plugin SHARED src/gazebo_drop_plugin.cpp)
+add_library(gazebo_two_arm_controller_plugin SHARED src/gazebo_two_arm_controller_plugin.cpp)
 
 set(plugins
   gazebo_airspeed_plugin
-  gazebo_camera_manager_plugin
+  gazebo_geotagged_images_plugin
   gazebo_gps_plugin
   gazebo_groundtruth_plugin
   gazebo_irlock_plugin
@@ -394,7 +392,7 @@ set(plugins
   gazebo_usv_dynamics_plugin
   gazebo_parachute_plugin
   gazebo_airship_dynamics_plugin
-  gazebo_drop_plugin
+  gazebo_two_arm_controller_plugin
   )
 
 foreach(plugin ${plugins})
@@ -402,12 +400,17 @@ foreach(plugin ${plugins})
 endforeach()
 target_link_libraries(gazebo_opticalflow_plugin ${OpticalFlow_LIBS})
 
-# If BUILD_ROS_PLUGINS set to ON, build plugins that have ROS dependencies
+#add_library(gazebo_two_arm_controller_plugin SHARED src/gazebo_two_arm_controller_plugin.cpp)
+#target_link_libraries(gazebo_two_arm_controller_plugin ${catkin_LIBRARIES} ${GAZEBO_libraries} ${roscpp_LIBRARIES})
+# If BUILD_ROS_INTERFACE set to ON, build plugins that have ROS dependencies
 # Current plugins that can be used with ROS interface: gazebo_motor_failure_plugin
-if (BUILD_ROS_PLUGINS)
+if (BUILD_ROS_INTERFACE)
   add_library(gazebo_motor_failure_plugin SHARED src/gazebo_motor_failure_plugin.cpp)
+  # add_library(gazebo_two_arm_controller_plugin SHARED src/gazebo_two_arm_controller_plugin.cpp)
   target_link_libraries(gazebo_motor_failure_plugin ${GAZEBO_libraries} ${roscpp_LIBRARIES})
+  # target_link_libraries(gazebo_two_arm_controller_plugin ${GAZEBO_libraries} ${roscpp_LIBRARIES})
   list(APPEND plugins gazebo_motor_failure_plugin)
+  # list(APPEND plugins gazebo_two_arm_controller_plugin)
   message(STATUS "adding gazebo_motor_failure_plugin to build")
 
   include_directories(
@@ -421,6 +424,11 @@ if (BUILD_ROS_PLUGINS)
     ${roscpp_LIBRARIES}
     ${GAZEBO_libraries}
   )
+  # target_link_libraries(gazebo_two_arm_controller_plugin
+  #   ${catkin_LIBRARIES}
+  #   ${roscpp_LIBRARIES}
+  #   ${GAZEBO_libraries}
+  # )
 endif()
 
 if (GSTREAMER_FOUND)
@@ -450,14 +458,6 @@ if (GSTREAMER_FOUND)
     message(STATUS "Found GStreamer: adding gst_video_stream_widget")
   endif()
 endif()
-
-QT5_WRAP_CPP(headers_MOC2 include/gazebo_user_camera_plugin.h)
-add_library(gazebo_user_camera_plugin SHARED ${headers_MOC2} src/gazebo_user_camera_plugin.cpp)
-target_link_libraries(gazebo_user_camera_plugin ${GAZEBO_LIBRARIES} ${Qt5Core_LIBRARIES} ${Qt5Widgets_LIBRARIES} ${Qt5Test_LIBRARIES})
-set(plugins
-  ${plugins}
-  gazebo_user_camera_plugin
-)
 
 # Linux is not consistent with plugin availability, even on Gazebo 7
 #if("${GAZEBO_VERSION}" VERSION_LESS "7.0")
